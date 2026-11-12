@@ -4,8 +4,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""
-A clone of 'netstat -antp' on Linux.
+"""A clone of 'netstat -antp' on Linux.
 
 $ python3 scripts/netstat.py
 Proto Local address      Remote address   Status        PID    Program name
@@ -20,10 +19,11 @@ tcp   172.17.42.1:55797  127.0.0.1:443    CLOSE_WAIT    13651  GoogleTalkPlugi
 """
 
 import socket
-from socket import AF_INET, SOCK_STREAM, SOCK_DGRAM
+from socket import AF_INET
+from socket import SOCK_DGRAM
+from socket import SOCK_STREAM
 
 import psutil
-
 
 AD = "-"
 AF_INET6 = getattr(socket, 'AF_INET6', object())
@@ -36,27 +36,34 @@ proto_map = {
 
 
 def main():
-    templ = "%-5s %-30s %-30s %-13s %-6s %s"
-    print(templ % (
-        "Proto", "Local address", "Remote address", "Status", "PID",
-        "Program name"))
+    templ = "{:<5} {:<30} {:<30} {:<13} {:<6} {}"
+    header = templ.format(
+        "Proto",
+        "Local address",
+        "Remote address",
+        "Status",
+        "PID",
+        "Program name",
+    )
+    print(header)
     proc_names = {}
     for p in psutil.process_iter(['pid', 'name']):
-        proc_names[p.info['pid']] = p.info['name']
+        proc_names[p.snapshot.pid] = p.snapshot.name
     for c in psutil.net_connections(kind='inet'):
-        laddr = "%s:%s" % (c.laddr)
+        laddr = f"{c.laddr[0]}:{c.laddr[1]}"
         raddr = ""
         if c.raddr:
-            raddr = "%s:%s" % (c.raddr)
+            raddr = f"{c.raddr[0]}:{c.raddr[1]}"
         name = proc_names.get(c.pid, '?') or ''
-        print(templ % (
+        line = templ.format(
             proto_map[(c.family, c.type)],
             laddr,
             raddr or AD,
             c.status,
             c.pid or AD,
             name[:15],
-        ))
+        )
+        print(line)
 
 
 if __name__ == '__main__':

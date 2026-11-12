@@ -4,25 +4,25 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""
-A simple micro benchmark script which prints the speedup when using
+"""A simple micro benchmark script which prints the speedup when using
 Process.oneshot() ctx manager.
-See: https://github.com/giampaolo/psutil/issues/799
+See: https://github.com/giampaolo/psutil/issues/799.
 """
 
-from __future__ import print_function, division
+import argparse
+import os
 import sys
-import timeit
 import textwrap
+import timeit
 
 import psutil
 
-
-ITERATIONS = 1000
+TIMES = 1000
+PID = os.getpid()
 
 # The list of Process methods which gets collected in one shot and
 # as such get advantage of the speedup.
-names = [
+NAMES = [
     'cpu_times',
     'cpu_percent',
     'memory_info',
@@ -32,45 +32,45 @@ names = [
 ]
 
 if psutil.POSIX:
-    names.append('uids')
-    names.append('username')
+    NAMES.extend(('uids', 'username'))
 
 if psutil.LINUX:
-    names += [
-        # 'memory_full_info',
+    NAMES += [
+        # 'memory_footprint',
         # 'memory_maps',
         'cpu_num',
         'cpu_times',
         'gids',
+        'memory_extras',
         'name',
-        'num_ctx_switches',
+        'ctx_switches',
         'num_threads',
+        'page_faults',
         'ppid',
         'status',
         'terminal',
         'uids',
     ]
 elif psutil.BSD:
-    names = [
+    NAMES = [
         'cpu_times',
         'gids',
         'io_counters',
-        'memory_full_info',
         'memory_info',
         'name',
-        'num_ctx_switches',
+        'ctx_switches',
         'ppid',
         'status',
         'terminal',
         'uids',
     ]
     if psutil.FREEBSD:
-        names.append('cpu_num')
+        NAMES.append('cpu_num')
 elif psutil.SUNOS:
-    names += [
+    NAMES += [
         'cmdline',
         'gids',
-        'memory_full_info',
+        'memory_footprint',
         'memory_info',
         'name',
         'num_threads',
@@ -80,21 +80,21 @@ elif psutil.SUNOS:
         'uids',
     ]
 elif psutil.MACOS:
-    names += [
+    NAMES += [
         'cpu_times',
         'create_time',
         'gids',
         'memory_info',
         'name',
-        'num_ctx_switches',
+        'ctx_switches',
         'num_threads',
         'ppid',
         'terminal',
         'uids',
     ]
 elif psutil.WINDOWS:
-    names += [
-        'num_ctx_switches',
+    NAMES += [
+        'ctx_switches',
         'num_threads',
         # dual implementation, called in case of AccessDenied
         'num_handles',
@@ -105,10 +105,8 @@ elif psutil.WINDOWS:
         'memory_info',
     ]
 
-names = sorted(set(names))
-
-setup = textwrap.dedent("""
-    from __main__ import names
+setup_code = textwrap.dedent("""
+    from __main__ import NAMES
     import psutil
 
     def call_normal(funs):
@@ -120,32 +118,55 @@ setup = textwrap.dedent("""
             for fun in funs:
                 fun()
 
-    p = psutil.Process()
-    funs = [getattr(p, n) for n in names]
+    p = psutil.Process({})
+    funs = [getattr(p, n) for n in NAMES]
     """)
 
 
+def parse_cli():
+    global TIMES, PID, NAMES
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument("-i", "--times", type=int, default=TIMES)
+    parser.add_argument("-p", "--pid", type=int, default=PID)
+    parser.add_argument("-n", "--names", default=None, metavar="METHOD,METHOD")
+    args = parser.parse_args()
+    TIMES = args.times
+    PID = args.pid
+    if args.names:
+        NAMES = args.names.split(",")
+    NAMES = sorted(set(NAMES))
+
+
 def main():
-    print("%s methods involved on platform %r (%s iterations, psutil %s):" % (
-        len(names), sys.platform, ITERATIONS, psutil.__version__))
-    for name in sorted(names):
-        print("    " + name)
+    parse_cli()
+    print(
+        f"{len(NAMES)} methods pre-fetched by oneshot() on platform"
+        f" {sys.platform!r} ({TIMES:,} times, psutil"
+        f" {psutil.__version__}):\n"
+    )
+    for name in sorted(NAMES):
+        print("  " + name)
+        attr = getattr(psutil.Process, name, None)
+        if attr is None or not callable(attr):
+            raise ValueError(f"invalid name {name!r}")
 
-    # "normal" run
-    elapsed1 = timeit.timeit(
-        "call_normal(funs)", setup=setup, number=ITERATIONS)
-    print("normal:  %.3f secs" % elapsed1)
+    # regular run
+    setup = setup_code.format(PID)
+    elapsed1 = timeit.timeit("call_normal(funs)", setup=setup, number=TIMES)
+    print(f"\nregular:  {elapsed1:.3f} secs")
 
-    # "one shot" run
-    elapsed2 = timeit.timeit(
-        "call_oneshot(funs)", setup=setup, number=ITERATIONS)
-    print("onshot:  %.3f secs" % elapsed2)
+    # oneshot() run
+    elapsed2 = timeit.timeit("call_oneshot(funs)", setup=setup, number=TIMES)
+    print(f"oneshot:  {elapsed2:.3f} secs")
 
     # done
     if elapsed2 < elapsed1:
-        print("speedup: +%.2fx" % (elapsed1 / elapsed2))
+        print(f"speedup:  +{elapsed1 / elapsed2:.2f}x")
     elif elapsed2 > elapsed1:
-        print("slowdown: -%.2fx" % (elapsed2 / elapsed1))
+        print(f"slowdown:  -{elapsed2 / elapsed1:.2f}x")
     else:
         print("same speed")
 

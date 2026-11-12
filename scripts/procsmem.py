@@ -4,8 +4,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""
-Show detailed memory usage about all (querable) processes.
+"""Show detailed memory usage about all (querable) processes.
 
 Processes are sorted by their "USS" (Unique Set Size) memory, which is
 probably the most representative metric for determining how much memory
@@ -33,16 +32,15 @@ PID     User    Cmdline                            USS     PSS    Swap     RSS
 20513   giampao /opt/sublime_text/sublime_text   65.8M   73.0M      0B   87.9M
 3976    giampao compiz                          115.0M  117.0M      0B  130.9M
 32486   giampao skype                           145.1M  147.5M      0B  149.6M
+
 """
 
-from __future__ import print_function
 import sys
 
 import psutil
 
-
-if not (psutil.LINUX or psutil.MACOS or psutil.WINDOWS):
-    sys.exit("platform not supported")
+if not hasattr(psutil.Process, "memory_footprint"):
+    sys.exit("can't retrieve USS memory on this platform")
 
 
 def convert_bytes(n):
@@ -53,8 +51,8 @@ def convert_bytes(n):
     for s in reversed(symbols):
         if n >= prefix[s]:
             value = float(n) / prefix[s]
-            return '%.1f%s' % (value, s)
-    return "%sB" % n
+            return f"{value:.1f}{s}"
+    return f"{n}B"
 
 
 def main():
@@ -63,15 +61,16 @@ def main():
     for p in psutil.process_iter():
         with p.oneshot():
             try:
-                mem = p.memory_full_info()
-                info = p.as_dict(["cmdline", "username"])
+                mem = p.memory_footprint()
+                info = p.as_dict(["cmdline", "username", "memory_info"])
             except psutil.AccessDenied:
                 ad_pids.append(p.pid)
             except psutil.NoSuchProcess:
                 pass
             else:
                 p._uss = mem.uss
-                p._rss = mem.rss
+                p._rss = info["memory_info"].rss
+                p._vms = info["memory_info"].vms
                 if not p._uss:
                     continue
                 p._pss = getattr(mem, "pss", "")
@@ -80,24 +79,27 @@ def main():
                 procs.append(p)
 
     procs.sort(key=lambda p: p._uss)
-    templ = "%-7s %-7s %7s %7s %7s %7s %7s"
-    print(templ % ("PID", "User", "USS", "PSS", "Swap", "RSS", "Cmdline"))
-    print("=" * 78)
+    templ = "{:<7} {:<7} {:>7} {:>7} {:>7} {:>7} {:>7} {}"
+    header = templ.format(
+        "PID", "User", "USS", "PSS", "Swap", "RSS", "VMS", "Cmdline"
+    )
+    print(header)
+    print("=" * len(header))
     for p in procs[:86]:
         cmd = " ".join(p._info["cmdline"])[:50] if p._info["cmdline"] else ""
-        line = templ % (
+        line = templ.format(
             p.pid,
             p._info["username"][:7] if p._info["username"] else "",
             convert_bytes(p._uss),
-            convert_bytes(p._pss) if p._pss != "" else "",
-            convert_bytes(p._swap) if p._swap != "" else "",
+            convert_bytes(p._pss) if p._pss else "",
+            convert_bytes(p._swap) if p._swap else "",
             convert_bytes(p._rss),
+            convert_bytes(p._vms),
             cmd,
         )
         print(line)
     if ad_pids:
-        print("warning: access denied for %s pids" % (len(ad_pids)),
-              file=sys.stderr)
+        print(f"warning: access denied for {len(ad_pids)} pids")
 
 
 if __name__ == '__main__':

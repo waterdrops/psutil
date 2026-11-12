@@ -4,8 +4,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""
-A clone of 'ps aux'.
+"""A clone of 'ps aux'.
 
 $ python3 scripts/ps.py
 USER         PID  %MEM     VSZ     RSS  NICE STATUS  START   TIME  CMDLINE
@@ -33,36 +32,39 @@ giampaolo  24123   0.0   35.0M    7.0M        sleep  02:12  00:02  bash
 """
 
 import datetime
+import shutil
 import time
 
 import psutil
-from psutil._common import bytes2human
-from psutil._compat import get_terminal_size
+from psutil import bytes2human
 
 
 def main():
     today_day = datetime.date.today()
-    templ = "%-10s %5s %5s %7s %7s %5s %6s %6s %6s  %s"
+    # fmt: off
+    templ = "{:<10} {:>5} {:>5} {:>7} {:>7} {:>5} {:>6} {:>6} {:>6}  {}"
     attrs = ['pid', 'memory_percent', 'name', 'cmdline', 'cpu_times',
              'create_time', 'memory_info', 'status', 'nice', 'username']
-    print(templ % ("USER", "PID", "%MEM", "VSZ", "RSS", "NICE",
-                   "STATUS", "START", "TIME", "CMDLINE"))
+    print(templ.format("USER", "PID", "%MEM", "VSZ", "RSS", "NICE",
+                       "STATUS", "START", "TIME", "CMDLINE"))
+    # fmt: on
     for p in psutil.process_iter(attrs, ad_value=None):
-        if p.info['create_time']:
-            ctime = datetime.datetime.fromtimestamp(p.info['create_time'])
+        if p.snapshot.create_time:
+            ctime = datetime.datetime.fromtimestamp(p.snapshot.create_time)
             if ctime.date() == today_day:
                 ctime = ctime.strftime("%H:%M")
             else:
                 ctime = ctime.strftime("%b%d")
         else:
             ctime = ''
-        if p.info['cpu_times']:
-            cputime = time.strftime("%M:%S",
-                                    time.localtime(sum(p.info['cpu_times'])))
+        if p.snapshot.cpu_times:
+            cputime = time.strftime(
+                "%M:%S", time.localtime(sum(p.snapshot.cpu_times))
+            )
         else:
             cputime = ''
 
-        user = p.info['username']
+        user = p.snapshot.username
         if not user and psutil.POSIX:
             try:
                 user = p.uids()[0]
@@ -73,22 +75,31 @@ def main():
         if not user:
             user = ''
         user = user[:9]
-        vms = bytes2human(p.info['memory_info'].vms) if \
-            p.info['memory_info'] is not None else ''
-        rss = bytes2human(p.info['memory_info'].rss) if \
-            p.info['memory_info'] is not None else ''
-        memp = round(p.info['memory_percent'], 1) if \
-            p.info['memory_percent'] is not None else ''
-        nice = int(p.info['nice']) if p.info['nice'] else ''
-        if p.info['cmdline']:
-            cmdline = ' '.join(p.info['cmdline'])
+        vms = (
+            bytes2human(p.snapshot.memory_info.vms)
+            if p.snapshot.memory_info is not None
+            else ''
+        )
+        rss = (
+            bytes2human(p.snapshot.memory_info.rss)
+            if p.snapshot.memory_info is not None
+            else ''
+        )
+        memp = (
+            round(p.snapshot.memory_percent, 1)
+            if p.snapshot.memory_percent is not None
+            else ''
+        )
+        nice = int(p.snapshot.nice) if p.snapshot.nice else ''
+        if p.snapshot.cmdline:
+            cmdline = ' '.join(p.snapshot.cmdline)
         else:
-            cmdline = p.info['name']
-        status = p.info['status'][:5] if p.info['status'] else ''
+            cmdline = p.snapshot.name
+        status = p.snapshot.status[:5] if p.snapshot.status else ''
 
-        line = templ % (
+        line = templ.format(
             user,
-            p.info['pid'],
+            p.snapshot.pid,
             memp,
             vms,
             rss,
@@ -96,8 +107,9 @@ def main():
             status,
             ctime,
             cputime,
-            cmdline)
-        print(line[:get_terminal_size()[0]])
+            cmdline,
+        )
+        print(line[: shutil.get_terminal_size()[0]])
 
 
 if __name__ == '__main__':
